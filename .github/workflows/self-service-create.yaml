@@ -1,0 +1,169 @@
+name: Self-Service - Create Team ArgoCD Setup
+on:
+  workflow_dispatch:  # Manual trigger for self-service
+    inputs:
+      clusterAddress:
+        description: 'Kubernetes API server URL of target cluster'
+        required: true
+      repoUrl:
+        description: 'Git URL of the team application repository'
+        required: true
+      projectName:
+        description: 'Project / Team name'
+        required: true
+      apmCode:
+        description: 'Short APM / namespace code (e.g. team1)'
+        required: true
+      appName:
+        description: 'Application name (only if not monorepo)'
+        required: false
+      monorepo:
+        description: 'Is this a monorepo? (yes/no)'
+        required: true
+        default: 'no'
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install yq  # For YAML manipulation
+        run: sudo snap install yq
+      - name: Generate AppProject
+        run: |
+          cat <<EOF > projects/np-${{ inputs.apmCode }}.yaml
+          ####
+          # np-<apm>.yaml - Restricts team to ns/cluster (security)
+          #####
+          apiVersion: argoproj.io/v1alpha1
+          kind: AppProject
+          metadata:
+            name: np-${{ inputs.apmCode }}
+            namespace: argocd
+          spec:
+            description: "Strict project for ${{ inputs.projectName }} (apm: ${{ inputs.apmCode }}) – isolated to spoke cluster and namespaces"
+            
+            # Restrict sources to only approved team repos (initially just the input; platform appends more via PRs)
+            sourceRepos:
+            - ${{ inputs.repoUrl }}  # e.g., https://github.com/org/team-repo.git
+            
+            # Restrict destinations to specific spoke cluster and namespace patterns
+            destinations:
+            - server: ${{ inputs.clusterAddress }}  # Exact spoke cluster API
+              namespace: np-${{ inputs.apmCode }}*  # Allow np-team1, np-team1-appA, etc.
+            
+            # Deny dangerous cluster-scoped resources (security best practice)
+            clusterResourceDeny:
+            - group: rbac.authorization.k8s.io
+              kind: ClusterRole
+            - group: rbac.authorization.k8s.io
+              kind: ClusterRoleBinding
+            - group: apiextensions.k8s.io
+              kind: CustomResourceDefinition
+            
+            # Optional: Whitelist only safe namespaced resources
+            namespaceResourceWhitelist:
+            - group: ''
+              kind: Deployment
+            - group: ''
+              kind: Service
+            - group: ''
+              kind: ConfigMap
+            - group: ''
+              kind: Secret
+            - group: apps
+              kind: StatefulSet
+            - group: networking.k8s.io
+              kind: Ingress
+            
+            # RBAC roles for team (read-only by default; extend as needed)
+            roles:
+            - name: team-role
+              policies:
+              - p, proj:np-${{ inputs.apmCode }}:team-role, applications, get, np-${{ inputs.apmCode }}/*, allow
+              - p, proj:np-${{ inputs.apmCode }}:team-role, applications, sync, np-${{ inputs.apmCode }}/*, allow  # Allow sync if trusted
+          EOF
+      - name: Generate Spoke ArgoCD Install (Helm)
+        run: |
+          mkdir -p argocd-installs/np-${{ inputs.apmCode }}/templates
+          cat <<EOF > argocd-installs/np-${{ inputs.apmCode }}/values.yaml
+          # values.yaml - Pin ArgoCD version for upgrades
+          server:
+            extraArgs: [--insecure]  # Local; secure in prod
+          configs:
+            cm:
+              url: https://argocd.${{ inputs.apmCode }}.example.com  # Team UI
+          EOF
+          cat <<EOF > argocd-installs/np-${{ inputs.apmCode }}/Chart.yaml
+          # Chart.yaml - Simple wrapper for ArgoCD Helm
+          apiVersion: v2
+          name: spoke-argocd-${{ inputs.apmCode }}
+          version: 1.0.0
+          dependencies:
+          - name: argo-cd
+            version: 6.0.0  # Pinned
+            repository: https://argoproj.github.io/argo-helm
+          EOF
+          cat <<EOF > argocd-installs/np-${{ inputs.apmCode }}/templates/argocd-app.yaml
+          # argocd-app.yaml - Deploys spoke ArgoCD as App
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: spoke-argocd-${{ inputs.apmCode }}
+            namespace: argocd
+          spec:
+            project: np-${{ inputs.apmCode }}
+            source:
+              chart: argo-cd
+              repoURL: https://argoproj.github.io/argo-helm
+              targetRevision: 6.0.0
+              helm:
+                valueFiles: [values.yaml]
+            destination:
+              server: ${{ inputs.clusterAddress }}
+              namespace: np-${{ inputs.apmCode }}  # Isolated ns
+            syncPolicy:
+              automated: { prune: true, selfHeal: true }
+          EOF
+      - name: Generate ApplicationSet
+        run: |
+          if [ "${{ inputs.monorepo }}" = "yes" ]; then
+            NAME="np-${{ inputs.apmCode }}"
+          else
+            NAME="np-${{ inputs.apmCode }}-${{ inputs.appName }}"
+          fi
+          cat <<EOF > applicationsets/$NAME.yaml
+          # $NAME.yaml - Deploys to app ns, not ArgoCD ns (best practice)
+          apiVersion: argoproj.io/v1alpha1
+          kind: ApplicationSet
+          metadata:
+            name: $NAME
+            namespace: np-${{ inputs.apmCode }}  # In spoke ns for isolation
+          spec:
+            generators:
+            - git:  # Watches team repo
+                repoURL: ${{ inputs.repoUrl }}
+                revision: main
+                files: [{ path: "values.yaml" }]  # Triggers on values changes
+            template:
+              metadata:
+                name: '{{path.basename}}'  # Dynamic
+              spec:
+                project: np-${{ inputs.apmCode }}
+                source:
+                  repoURL: ${{ inputs.repoUrl }}
+                  targetRevision: main
+                  path: '{{path}}'  # Monorepo paths or single
+                  helm:
+                    valueFiles: [values.yaml]  # Tag updates here deploy artifacts
+                destination:
+                  server: ${{ inputs.clusterAddress }}
+                  namespace: $NAME  # App-specific ns
+                syncPolicy:
+                  automated: { prune: true, selfHeal: true }
+          EOF
+      - name: Commit and Push
+        uses: actions-js/push@master
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: main
+          message: "chore: auto-bootstrap team ${{ inputs.projectName }} (${{ inputs.apmCode }})"

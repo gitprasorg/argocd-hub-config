@@ -1,0 +1,93 @@
+name: Platform - Append Source Repo to AppProject
+
+on:
+  workflow_dispatch:
+    inputs:
+      apm_code:
+        description: 'APM code (e.g. team1, finance, np-team-a)'
+        required: true
+        type: string
+      new_repo_url:
+        description: 'Full Git HTTPS URL of the repo to append (e.g. https://github.com/org/shared-charts.git)'
+        required: true
+        type: string
+      issue_number:
+        description: 'GitHub issue number this change is for (for linking in PR body)'
+        required: false
+        type: string
+      reason:
+        description: 'Short reason / justification (appears in commit & PR)'
+        required: false
+        type: string
+
+permissions:
+  contents: write      # Required to push branch and commit
+  pull-requests: write # Required to create PR
+
+jobs:
+  append-and-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0   # Needed for proper branch creation
+
+      - name: Configure git user
+        run: |
+          git config user.name "GitHub Actions (Platform Team)"
+          git config user.email "actions@github.com"
+
+      - name: Create feature branch
+        run: |
+          BRANCH="platform/append-repo-${{ inputs.apm_code }}-${{ github.run_id }}"
+          git checkout -b $BRANCH
+
+      - name: Append new source repo using yq
+        run: |
+          FILE="projects/np-${{ inputs.apm_code }}.yaml"
+          
+          if [[ ! -f "$FILE" ]]; then
+            echo "Error: File $FILE does not exist!"
+            exit 1
+          fi
+
+          # Append to spec.sourceRepos array (idempotent: won't duplicate if already present)
+          yq eval-all '
+            select(fileIndex == 0) as $item ireduce ({}; . * $item) |
+            .spec.sourceRepos += ["${{ inputs.new_repo_url }}"] |
+            .spec.sourceRepos |= unique
+          ' -i "$FILE"
+
+          # Optional: pretty print / sort (cosmetic)
+          yq eval '.spec.sourceRepos |= sort' -i "$FILE"
+
+          git diff "$FILE" || echo "No changes detected (repo already present?)"
+
+      - name: Commit changes
+        run: |
+          git add projects/np-${{ inputs.apm_code }}.yaml
+          git commit -m "Append source repo ${{ inputs.new_repo_url }} to np-${{ inputs.apm_code }} project" \
+                     -m "Reason: ${{ inputs.reason || 'Requested via issue' }}" \
+                     -m "Issue: #${{ inputs.issue_number || 'N/A' }}" \
+                     --allow-empty   # in case no change (already exists)
+
+      - name: Push branch
+        run: |
+          BRANCH="platform/append-repo-${{ inputs.apm_code }}-${{ github.run_id }}"
+          git push origin $BRANCH
+
+      - name: Create Pull Request using gh CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="platform/append-repo-${{ inputs.apm_code }}-${{ github.run_id }}"
+          
+          gh pr create \
+            --base main \
+            --head $BRANCH \
+            --title "platform: append source repo to np-${{ inputs.apm_code }}" \
+            --body "Appends new source repository:\n\`${{ inputs.new_repo_url }}\`\n\nReason: ${{ inputs.reason || 'Not provided' }}\nIssue: #${{ inputs.issue_number || 'N/A' }}\n\nTriggered by platform team via workflow dispatch." \
+            --label "platform-change,appproject-update" \
+            --reviewer awesomepras  # ← customize or remove

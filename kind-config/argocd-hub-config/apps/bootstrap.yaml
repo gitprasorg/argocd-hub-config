@@ -1,0 +1,19 @@
+# bootstrap.yaml - Watches central repo for changes
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root-apps
+  namespace: argocd
+spec:
+  project: default  # Default for hub
+  source:
+    repoURL: https://github.com/gitprasorg/argocd-hub-config.git
+    targetRevision: main
+    path: argocd-hub-config/apps  # Or full repo for all
+  destination:
+    server: https://kubernetes.default.svc  # In-cluster (hub)
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

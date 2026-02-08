@@ -1,9 +1,15 @@
 configs:
   params:
-    server.insecure: true  # For local; use TLS in prod
+    server.insecure: false               # ← change to false (or remove)
 server:
+  extraArgs:
+    - --insecure=false                 # optional explicit
   service:
     type: LoadBalancer
     loadBalancerIP: 172.18.255.100
   ingress:
-    enabled: false  # Use if needed
+    enabled: false                     # still false, since no ingress
+  # TLS config (Argo CD will use this secret automatically if named argocd-server-tls)
+  # or explicitly:
+  # tls:
+  #   secretName: argocd-server-tls
