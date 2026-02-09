@@ -1,0 +1,23 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: spoke-argocd-np-bjgs
+  namespace: argocd
+spec:
+  project: np-bjgs
+  source:
+    repoURL: https://github.com/your-org/argocd-hub-config.git
+    targetRevision: main
+    path: argocd-installs/np-bjgs
+    helm:
+      values: |  # inline or ref values.yaml
+        {{ .Values | toYaml | indent 4 }}
+  destination:
+    server: https://172.18.0.3:6443  # spoke1
+    namespace: argocd  # create argocd ns in spoke
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true

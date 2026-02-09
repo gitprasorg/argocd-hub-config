@@ -1,0 +1,14 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: np-bjgs
+  namespace: argocd
+spec:
+  sourceRepos:
+  - '*'  # or team repo only
+  destinations:
+  - namespace: np-bjgs
+    server: https://172.18.0.3:6443  # spoke1
+  clusterResourceWhitelist:
+  - group: ''
+    kind: Namespace

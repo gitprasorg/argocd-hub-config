@@ -1,0 +1,26 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: np-bjgs-apps
+  namespace: argocd
+spec:
+  generators:
+  - git:
+      repoURL: https://github.com/team-repo.git  # team self-service repo
+      revision: main
+      directories:
+      - path: apps/*
+  template:
+    metadata:
+      name: '{{path.basename}}'
+    spec:
+      project: np-bjgs
+      source:
+        repoURL: https://github.com/team-repo.git
+        targetRevision: main
+        path: '{{path}}'
+      destination:
+        server: https://172.18.0.3:6443
+        namespace: np-bjgs
+      syncPolicy:
+        automated: {}
