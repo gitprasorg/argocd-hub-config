@@ -8,7 +8,7 @@ spec:
   source:
     repoURL: https://github.com/your-org/argocd-hub-config.git
     targetRevision: main
-    path: argocd-installs/np-bjgs
+    path: argocd-hub-config/argocd-installs/np-bjgs
     helm:
       values: |  # inline or ref values.yaml
         {{ .Values | toYaml | indent 4 }}

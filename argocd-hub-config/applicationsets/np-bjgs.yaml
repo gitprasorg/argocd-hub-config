@@ -9,7 +9,7 @@ spec:
       repoURL: https://github.com/team-repo.git  # team self-service repo
       revision: main
       directories:
-      - path: apps/*
+      - path: argocd-hub-config/apps/*
   template:
     metadata:
       name: '{{path.basename}}'

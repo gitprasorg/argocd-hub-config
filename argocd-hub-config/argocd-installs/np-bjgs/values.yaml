@@ -4,4 +4,4 @@ argo-cd:
       server.insecure: true
   server:
     service:
-      type: ClusterIP
+      type: LoadBalancerIP # ClusterIP
