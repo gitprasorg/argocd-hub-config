@@ -1,0 +1,35 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: hub-config
+  namespace: argocd
+spec:
+  generators:
+  - git:
+      repoURL: https://github.com/gitprasorg/argocd-hub-config.git
+      revision: main
+      directories:
+      - path: argocd-hub-config/apps/*
+  template:
+    metadata:
+      name: '{{path.basename}}'
+    spec:
+      # This is the hub-side AppProject which controls what the hub App may do
+      project: hub-np-bjgs
+      source:
+        repoURL: https://github.com/gitprasorg/argocd-hub-config.git
+        targetRevision: main
+        path: '{{path}}'
+      destination:
+        # Hub will apply the manifests into the spoke cluster's argocd namespace
+        server: https://172.18.0.3:6443
+        namespace: argocd
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        # Ensure the spoke `argocd` namespace exists when hub applies this manifest
+        # so the App-of-App and any AppProject resources can be created there.
+        syncOptions:
+        - CreateNamespace=true
+

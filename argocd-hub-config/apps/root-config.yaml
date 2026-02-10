@@ -1,0 +1,19 @@
+# apiVersion: argoproj.io/v1alpha1
+# kind: Application
+# metadata:
+#   name: root-config
+#   namespace: argocd
+# spec:
+#   project: hub-np-bjgs
+#   source:
+#     repoURL: https://github.com/gitprasorg/argocd-hub-config.git
+#     targetRevision: main
+#     # This Application watches configuration (applicationsets, projects, apps)
+#     path: argocd-hub-config
+#   destination:
+#     server: https://kubernetes.default.svc
+#     namespace: argocd
+#   syncPolicy:
+#     automated:
+#       prune: true
+#       selfHeal: true

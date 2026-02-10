@@ -1,0 +1,18 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: hub-project
+  namespace: argocd
+spec:
+  description: Hub project used by ApplicationSet to apply App-of-App into spoke
+  sourceRepos:
+  - 'https://github.com/gitprasorg/argocd-hub-config.git'
+  # This AppProject controls what the hub-created Applications are
+  # permitted to do. It is separate from the spoke AppProject.
+  # Keep hub project permissions minimal: only the hub repo and the spoke destination.
+  destinations:
+  - namespace: argocd
+    server: https://172.18.0.3:6443
+  clusterResourceWhitelist:
+  - group: ''
+    kind: Namespace

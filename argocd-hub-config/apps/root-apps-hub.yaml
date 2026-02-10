@@ -13,7 +13,9 @@ spec:
   destination:
     server: https://kubernetes.default.svc  # In-cluster (hub)
     namespace: argocd
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+  syncPolicy: {}
+    # Disable automated sync for the hub ArgoCD installation management in this repo.
+    # The ArgoCD installation (infra) should live in a separate repo and be promoted
+    # with a controlled process. Keeping this Application manual prevents accidental
+    # upgrades to the hub ArgoCD when repo changes are pushed.
+    # To apply changes: use the ArgoCD UI or `argocd app sync root-apps` after review.

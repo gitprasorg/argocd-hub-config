@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: team1-sample-app
+  namespace: argocd
+spec:
+  project: np-bjgs
+  source:
+    repoURL: https://github.com/gitprasorg/team1-sample-app
+    targetRevision: main
+    path: .
+  destination:
+    # When this manifest is applied into the spoke cluster's `argocd` ns,
+    # the spoke ArgoCD should treat `https://kubernetes.default.svc` as its
+    # in-cluster API (i.e. the spoke cluster itself). This is the recommended
+    # value for App-of-App because it always refers to the cluster the
+    # Application resource lives in and avoids relying on external IPs.
+    server: https://kubernetes.default.svc
+    namespace: np-bjgs
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+  # This Application is the App-of-App (applied into the spoke `argocd` ns).
+  # Keep `destination.server: https://kubernetes.default.svc` so the spoke
+  # ArgoCD treats the target as in-cluster. If you want the hub to manage
+  # the cluster remotely, replace `server` with the spoke API endpoint and
+  # register the cluster in the hub ArgoCD.

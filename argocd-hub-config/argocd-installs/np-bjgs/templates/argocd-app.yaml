@@ -6,7 +6,7 @@ metadata:
 spec:
   project: np-bjgs
   source:
-    repoURL: https://github.com/your-org/argocd-hub-config.git
+    repoURL: https://github.com/gitprasorg/argocd-hub-config.git
     targetRevision: main
     path: argocd-hub-config/argocd-installs/np-bjgs
     helm:

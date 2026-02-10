@@ -4,11 +4,15 @@ metadata:
   name: np-bjgs
   namespace: argocd
 spec:
+  description: Spoke-side project for team np-bjgs (applied into spoke by hub)
   sourceRepos:
-  - '*'  # or team repo only
+  - 'https://github.com/gitprasorg/team1-sample-app'
   destinations:
   - namespace: np-bjgs
-    server: https://172.18.0.3:6443  # spoke1
+    server: https://kubernetes.default.svc
   clusterResourceWhitelist:
   - group: ''
     kind: Namespace
+  # NOTE: This `AppProject` will be applied into the *spoke* ArgoCD instance
+  # (the hub applies it into the spoke `argocd` namespace). The `server` uses
+  # the in-cluster API address so the spoke ArgoCD manages its own cluster.
