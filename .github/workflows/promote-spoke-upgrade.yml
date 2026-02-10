@@ -1,0 +1,36 @@
+name: Promote Spoke ArgoCD Upgrade
+
+on:
+  workflow_dispatch:
+    inputs:
+      spoke_app_name:
+        description: 'ArgoCD Application name for the spoke ArgoCD (App-of-App)'
+        required: true
+      hub_server:
+        description: 'Hub ArgoCD API server (e.g. https://argocd.example.com)'
+        required: true
+      argocd_auth_token:
+        description: 'ArgoCD API token stored as secret (use repo secret)'
+        required: true
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install argocd CLI
+        run: |
+          curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x /usr/local/bin/argocd
+
+      - name: Promote spoke upgrade
+        env:
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          HUB=${{ github.event.inputs.hub_server }}
+          SPOKE_APP=${{ github.event.inputs.spoke_app_name }}
+
+          echo "Triggering sync for $SPOKE_APP on $HUB"
+          argocd --server $HUB --auth-token "$ARGOCD_AUTH_TOKEN" app sync "$SPOKE_APP"
+          argocd --server $HUB --auth-token "$ARGOCD_AUTH_TOKEN" app wait "$SPOKE_APP" --health --timeout 300
+

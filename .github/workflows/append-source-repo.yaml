@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       apm_code:
-        description: 'APM code (e.g. team1, finance, np-team-a)'
+        description: 'APM code'
         required: true
         type: string
       new_repo_url:
-        description: 'Full Git HTTPS URL of the repo to append (e.g. https://github.com/org/shared-charts.git)'
+        description: Git HTTPS URL of the repo to append (e.g. https://github.com/org/shared-charts.git)'
         required: true
         type: string
       issue_number:
