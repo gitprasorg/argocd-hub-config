@@ -28,6 +28,7 @@ spec:
         automated:
           prune: true
           selfHeal: true
+          allowEmpty: False # prevents an accidental empty repo from deleting all apps
         # Ensure the spoke `argocd` namespace exists when hub applies this manifest
         # so the App-of-App and any AppProject resources can be created there.
         syncOptions:

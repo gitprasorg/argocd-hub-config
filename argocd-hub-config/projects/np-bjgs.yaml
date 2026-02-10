@@ -9,7 +9,8 @@ spec:
   - 'https://github.com/gitprasorg/team1-sample-app'
   destinations:
   - namespace: np-bjgs
-    server: https://kubernetes.default.svc
+    server:  https://172.18.0.3:6443 #exact spoke API url
+    #default is  https://kubernetes.default.svc)
   clusterResourceWhitelist:
   - group: ''
     kind: Namespace
