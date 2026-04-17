@@ -1,0 +1,416 @@
+tenants/<region>/<env>/<appcode>-<env>/
+  project.yaml
+  applicationset.yaml
+
+This leads to:
+
+❌ 1 ApplicationSet per app per env → too many resources
+❌ Manual onboarding (copy-paste per team)
+❌ Hard to enforce consistency
+❌ Hard to evolve (schema changes = mass edits)
+
+1 central ApplicationSet per region (or per cluster)
+
+eams only contribute metadata (declarative config)
+ArgoCD auto-generates:
+Projects
+Applications
+Zero YAML duplication per env
+
+
+Repo 1: argocd-bootstrap
+
+(you already have this ✔️)
+
+installs ArgoCD
+installs base ApplicationSets
+
+
+Repo 2: argocd-applicationset (CONTROL PLANE)
+
+👉 This repo should contain:
+
+argocd-applicationset/
+  clusters/
+    nane1/
+      applicationset.yaml
+    nane2/
+      applicationset.yaml
+#Single ApplicationSet per cluster/region
+#Instead of folders per env, define one file per application/team
+  tenants/
+    ABCD.yaml
+    ERFT.yaml
+    QWER.yaml
+#---------------------
+# clusters/nane1/applicationset.yaml
+#---------------------
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: nane1-applications
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+    - git:
+        repoURL: https://github.com/myapporg/argocd-applicationset
+        revision: main
+        files:
+          - path: tenants/*.yaml
+
+  template:
+    metadata:
+      name: '{{.appCode}}-{{.deployment.env}}'
+    spec:
+      project: '{{.appCode}}'
+      source:
+        repoURL: '{{.repoURL}}'
+        targetRevision: HEAD
+        path: '{{.chartPath}}'
+        helm:
+          valueFiles:
+            - '{{.deployment.valuesFile}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{.deployment.namespace}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+
+  templatePatch: |
+    {{- if ne .deployment.cluster "nane1" }}
+    spec:
+      syncPolicy: {}
+    {{- end }}
+
+---
+#---------------------
+# tenants/ABCD.yaml
+#---------------------
+appCode: abcd
+repoURL: https://github.com/myorg/abcd-helm
+chartPath: .
+
+deployments:
+  - env: ist
+    cluster: nane1
+    namespace: abcd-ist
+    valuesFile: values-ist.yaml
+
+  - env: uat
+    cluster: nane1
+    namespace: abcd-uat
+    valuesFile: values-uat.yaml
+
+  - env: nft
+    cluster: nane1
+    namespace: abcd-nft
+    valuesFile: values-nft.yaml
+
+  - env: prd
+    cluster: nane1
+    namespace: abcd-prd
+    valuesFile: values-prd.yaml
+
+
+
+ArgoCD Project (RBAC Isolation)
+You still want per-app project.
+
+👉 DO NOT store them per-folder
+👉 Generate them via another ApplicationSet
+project-applicationset.yaml
+
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: projects
+spec:
+  generators:
+    - git:
+        repoURL: https://github.com/myapporg/argocd-applicationset
+        revision: main
+        files:
+          - path: tenants/*.yaml
+
+  template:
+    metadata:
+      name: '{{appCode}}-project'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/myapporg/argocd-applicationset
+        targetRevision: main
+        path: project-template
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: argocd
+
+project-template/project.yaml
+
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: '{{appCode}}'
+spec:
+  description: Project for {{appCode}}
+  sourceRepos:
+    - '{{repoURL}}'
+  destinations:
+    - namespace: '{{appCode}}-*'
+      server: '*'
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+
+Deployment Flow
+Team creates:
+tenants/ABCD.yaml
+Git push triggers:
+Project auto-created
+Applications auto-created (ist/uat/nft/prd)
+Namespaces auto-targeted
+
+👉 ZERO manual ArgoCD work
+
+
+Final folder structure
+argocd-applicationset/
+  clusters/
+    nane1/
+      applicationset.yaml
+    us-central1/
+      applicationset.yaml
+
+  tenants/
+    ABCD.yaml
+    ERFT.yaml
+
+  project-template/
+    project.yaml
+
+Later, you can evolve to:
+
+image updater (argocd-image-updater) → auto bump digest
+
+App-of-Apps → ArgoCD manages Applications as Kubernetes manifests
+ApplicationSet → ArgoCD generates Applications dynamically
+
+| Capability         | App-of-Apps           | ApplicationSet        |
+| ------------------ | --------------------- | --------------------- |
+| App creation       | Manual (YAML per app) | Automatic (generated) |
+| Scaling (50+ apps) | 😬 painful            | ✅ built for it        |
+| Multi-env handling | Duplication           | Template-driven       |
+| Multi-cluster      | Harder                | Native support        |
+| GitOps purity      | ✅ strong              | ✅ strong              |
+| Flexibility        | Medium                | High                  |
+| Complexity         | Low                   | Medium                |
+| Drift control      | Good                  | Excellent             |
+| Onboarding new app | Copy YAML             | Add 1 config file     |
+| RBAC isolation     | Manual                | Can be generated      |
+
+
+Use App-of-Apps for:
+Bootstrapping ArgoCD itself
+Installing platform components:
+ingress
+service mesh
+config sync
+observability stack
+
+platform-root-app
+  ├── argocd
+  ├── istio
+  ├── monitoring
+  └── applicationsets
+
+Layer 1: App-of-Apps (Platform Layer)
+Bootstrap cluster
+Install:
+ArgoCD
+ApplicationSets
+shared infra
+Layer 2: ApplicationSet (Workload Layer)
+Generate:
+AppProjects
+Applications
+Driven by:
+tenants/*.yaml
+
+[ App-of-Apps ]
+        ↓
+[ ArgoCD Installed ]
+        ↓
+[ ApplicationSets ]
+        ↓
+[ Generated Applications ]
+        ↓
+[ Helm Charts (App Teams) ]
+
+
+
+argocd Bootstrap applicationset
+bootstrap-applicationset.yaml
+
+Add this to your bootstrap repo:
+
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: bootstrap-applicationsets
+  namespace: argocd
+spec:
+  generators:
+    - git:
+        repoURL: https://github.com/myapporg/argocd-applicationset
+        revision: main
+        directories:
+          - path: clusters/*
+
+  template:
+    metadata:
+      name: '{{path.basename}}-apps'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/myapporg/argocd-applicationset
+        targetRevision: main
+        path: '{{path}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: argocd
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+
+What this does
+Watches:
+clusters/nane1/
+clusters/us-central1/
+For each folder → creates an ArgoCD Application
+That Application contains your real ApplicationSets.
+This is your App-of-Apps → ApplicationSet bridge
+
+Add Monitoring (Prometheus / Kiali)
+
+Now let’s integrate monitoring into bootstrap.
+
+You have two clean options:
+
+✅ Option 1 (Recommended): App-of-Apps for Platform
+
+Keep monitoring in bootstrap layer.
+
+Structure:
+argocd-bootstrap/
+  platform/
+    prometheus.yaml
+    kiali.yaml
+  root-app.yaml
+
+root-app.yaml (App-of-Apps)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/myapporg/argocd-bootstrap
+    targetRevision: main
+    path: platform
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+Prometheus (via Helm)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prometheus
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 58.0.0
+    helm:
+      values: |
+        grafana:
+          enabled: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+📄 Kiali (for Istio)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kiali
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://kiali.org/helm-charts
+    chart: kiali-server
+    targetRevision: 1.73.0
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: istio-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+
+
+Terraform → GKE Autopilot
+        ↓
+Config Sync
+        ↓
+argocd-bootstrap (Kustomize)
+        ↓
+ArgoCD + ApplicationSet controller
+        ↓
+bootstrap-applicationset
+        ↓
+argocd-applicationset repo
+        ↓
+Generated Applications (teams)
+
+Config Sync vs ArgoCD conflict
+
+Make sure:
+
+Config Sync manages ONLY bootstrap
+ArgoCD manages everything else
+
+👉 Avoid overlapping resources
+
+2. Namespace creation
+
+Autopilot is strict.
+
+Add:
+
+syncOptions:
+  - CreateNamespace=true
+3. RBAC (later step)
+
+4. Helm repo access
+
+If private:
+
+configure argocd-repo-server secrets early
