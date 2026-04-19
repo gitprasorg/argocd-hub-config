@@ -414,3 +414,222 @@ syncOptions:
 If private:
 
 configure argocd-repo-server secrets early
+
+----
+
+## Release to prod :
+
+Tenant schema update: 
+
+```yaml 
+appCode: abcd
+repoURL: https://github.com/myorg/abcd-helm
+chartPath: .
+
+deployments:
+  - env: ist
+    cluster: nane1
+    namespace: abcd-ist
+    valuesFile: values-ist.yaml
+    revision: "feature/*"     # or branch pattern
+
+  - env: uat
+    cluster: nane1
+    namespace: abcd-uat
+    valuesFile: values-uat.yaml
+    revision: "develop"       # or specific branch
+
+  - env: nft
+    cluster: nane1
+    namespace: abcd-nft
+    valuesFile: values-nft.yaml
+    revision: "release/*"     # pre-release branches
+
+  - env: stg
+    cluster: nane1
+    namespace: abcd-stg
+    valuesFile: values-stg.yaml
+    revision: "v*-rc*"        # ONLY RC tags allowed
+
+  - env: prd
+    cluster: nane1
+    namespace: abcd-prd
+    valuesFile: values-prd.yaml
+    revision: "v*"            # ONLY version tags (no -rc)
+
+```
+
+Template update : 
+```yaml 
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: nane1-applications
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+
+  generators:
+    - git:
+        repoURL: https://github.com/myapporg/argocd-applicationset
+        revision: main
+        files:
+          - path: tenants/*.yaml
+
+  template:
+    metadata:
+      name: '{{.appCode}}-{{.deployment.env}}'
+    spec:
+      project: '{{.appCode}}'
+      source:
+        repoURL: '{{.repoURL}}'
+        targetRevision: '{{.deployment.revision}}'
+        path: '{{.chartPath}}'
+        helm:
+          valueFiles:
+            - '{{.deployment.valuesFile}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{.deployment.namespace}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+
+  templatePatch: |
+    {{- /* Block main branch to prod */ -}}
+    {{- if and (eq .deployment.env "prd") (eq .deployment.revision "main") }}
+    spec:
+      syncPolicy: null
+    {{- end }}
+
+    {{- /* Block non-tag deployments to prod */ -}}
+    {{- if and (eq .deployment.env "prd") (not (regexMatch "^v[0-9]+\\.[0-9]+(\\.[0-9]+)?$" .deployment.revision)) }}
+    spec:
+      syncPolicy: null
+    {{- end }}
+
+    {{- /* Block release tags in nonprod */ -}}
+    {{- if and (ne .deployment.env "prd") (regexMatch "^v[0-9]+\\.[0-9]+(\\.[0-9]+)?$" .deployment.revision) }}
+    spec:
+      syncPolicy: null
+    {{- end }}
+```
+
+Production
+❌ main branch → blocked
+❌ RC tags (v1.2.3-rc1) → blocked
+✅ Only release tags (v1.2 or v1.2.3) allowed
+Non-Prod (ist/uat/nft/stg)
+✅ branches allowed (feature/*, develop, etc.)
+✅ RC tags allowed (v1.2.3-rc1)
+❌ release tags blocked (optional but recommended)
+
+GitHub Actions (or CI)
+Enforce:
+RC tags → created from main
+Release tags → created only after approval
+2. Protect production values file
+values-prd.yaml updates require PR approval
+
+
+How to incorporate CHG process :
+AppProject isolation (hard guardrails)
+RBAC tied to your AD/SSO groups (who can sync prod)
+Process gate (manual approval or PR-based change)
+
+```yaml 
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: abcd
+  namespace: argocd
+spec:
+  description: Project for abcd
+
+  sourceRepos:
+    - https://github.com/myorg/abcd-helm
+
+  destinations:
+    # allow only namespaces that match pattern
+    - namespace: abcd-*
+      server: https://kubernetes.default.svc
+
+  # 👇 This is critical: prevent cluster-wide abuse
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+    - group: apps
+      kind: Deployment
+    - group: ''
+      kind: Service
+
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+
+  roles:
+    # 👇 Production deploy role
+    - name: prod-deployer
+      description: Can deploy to production only
+      policies:
+        - p, proj:abcd:prod-deployer, applications, sync, abcd-prd, allow
+        - p, proj:abcd:prod-deployer, applications, get, abcd-prd, allow
+      groups:
+        - ad-group-prod-deployers
+
+```
+App cannot deploy outside abcd-* namespaces
+Only AD group ad-group-prod-deployers can:
+sync prod
+view prod app
+
+👉 Even if someone edits YAML → ArgoCD blocks it
+ArgoCD RBAC (global policy)
+```argocd-rbac-cm 
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-rbac-cm
+  namespace: argocd
+data:
+  policy.default: role:readonly
+
+  policy.csv: |
+    # 👇 allow prod deploy only for this AD group
+    g, ad-group-prod-deployers, proj:abcd:prod-deployer
+
+    # optional: read-only for others
+    g, ad-group-developers, role:readonly
+```
+
+Change Management (the actual “gate”)
+
+Enforcement
+AppProject → namespace + repo restriction
+RBAC → AD group controls sync
+✅ Change management
+PR required for:
+values-prd.yaml OR release tag
+✅ Runtime control
+Prod:
+❌ auto-sync disabled
+✅ manual sync by AD group
+
+Flow :
+Developer → deploys to IST/UAT/NFT via branch/RC
+        ↓
+QA validates
+        ↓
+Create PR → update prod tag/version
+        ↓
+Approval (change management)
+        ↓
+Merge to main
+        ↓
+ArgoCD detects change
+        ↓
+Authorized AD group clicks SYNC (or auto if allowed)
+        ↓
+Production deployed
